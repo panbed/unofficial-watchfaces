@@ -23,9 +23,11 @@
 
 import QtQuick 2.1
 import QtGraphicalEffects 1.12
-// import QtSensors 5.11
+import QtSensors 5.11
 import org.asteroid.controls 1.0
 import org.asteroid.utils 1.0
+import Nemo.Configuration 1.0
+import Nemo.Mce 1.0
 
 Item {
     property string fontName: "Terminus (TTF)"
@@ -47,7 +49,7 @@ Item {
     layer.effect: DropShadow {
         verticalOffset: 3
         horizontalOffset: 2
-        color: "#000000"
+        color: Qt.rgba(0, 0, 0, .95)
         radius: 2
         samples: 2
     }
@@ -58,8 +60,13 @@ Item {
         property font wfFont: Qt.font({
             family: fontName,
             italic: false,
-            pointSize: parent.height * 0.05,
+            pixelSize: Math.round(parent.height * 0.07),
         })
+
+        Component.onCompleted: {
+            console.log("Pixelsize:")
+            console.log(Math.round(parent.height * 0.07))
+        }
     }
 
     // "Main" area in which the "terminal" will reside in
@@ -68,7 +75,7 @@ Item {
         id: termArea
         anchors.verticalCenter: parent.verticalCenter
         anchors.horizontalCenter: parent.horizontalCenter
-        color: Qt.rgba(255, 0, 0, 0.0)
+        color: Qt.rgba(0, 0, 0, 0.0)
         width: parent.width * 0.65
         height: parent.height * 0.5
     }
@@ -190,30 +197,53 @@ Item {
         renderType: Text.NativeRendering
         font: theme.wfFont
         color: fgAlt
-        visible: !displayAmbient
 
-        // Create battery bar, e.g.: [##....] 27%
-        property int battBarLength: 6
-        function createBattBar(battBarNum) {
-            var battBar = ""
-            for (var i = 0; i < battBarLength; i++) {
-                if (i < battBarNum) {
-                    battBar += "#"
-                }
-                else {
-                    battBar += "."
-                }
-            }
-
-            return battBar
+        ConfigurationValue {
+            id: timestampDay0
+            key: "/org/asteroidos/weather/timestamp-day0"
+            defaultValue: 0
         }
 
-        property int battPercent: (featureSlider.value * 100).toFixed(0)
-        property int battBarNum: Math.round(battPercent * (battBarLength/100))
-        property string battFormat: createBattBar(battBarNum)
-        property string battString: `[<font color="${fg4}">${battFormat}</font>] <font color="${fg4}">${battPercent}%</font>`
+        ConfigurationValue {
+            id: useFahrenheit
+            key: "/org/asteroidos/settings/use-fahrenheit"
+            defaultValue: false
+        }
 
-        text: `[WTHR] <strong>${battString}</strong>`
+        ConfigurationValue {
+            id: owmId
+            key: "/org/asteroidos/weather/day0/id"
+            defaultValue: 0
+        }
+
+        ConfigurationValue {
+            id: maxTemp
+            key: "/org/asteroidos/weather/day0/max-temp"
+            defaultValue: 0
+        }
+
+        ConfigurationValue {
+            id: minTemp
+            key: "/org/asteroidos/weather/day0/min-temp"
+            defaultValue: 0
+        }
+
+        visible: (displayAmbient || maxTemp.value == 0) ? false : true
+
+        function kelvinToTemperatureString(kelvin) {
+            var celsius = (kelvin - 273);
+            if (!useFahrenheit.value)
+                return celsius + "°C";
+            else
+                return Math.round(((celsius)*9/5) + 32) + "°F";
+        }
+
+        property bool weatherSynced: maxTemp.value != 0
+
+        property string wthrFormat: `${kelvinToTemperatureString(minTemp.value)} <font color="${fgAlt}">/</font> ${kelvinToTemperatureString(maxTemp.value)}`
+        property string wthrString: `<font color="${fg5}">${wthrFormat}</font>`
+
+        text: `[WTHR] <strong>${wthrString}</strong>`
         textFormat: Text.StyledText
         horizontalAlignment: Text.AlignLeft
         anchors {
@@ -230,6 +260,7 @@ Item {
         renderType: Text.NativeRendering
         font: theme.wfFont
         color: fgMain
+        visible: !displayAmbient
 
         property string username: "usr"
         property string hostname: "astr"
