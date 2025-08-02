@@ -62,11 +62,6 @@ Item {
             italic: false,
             pixelSize: Math.round(parent.height * 0.07),
         })
-
-        Component.onCompleted: {
-            console.log("Pixelsize:")
-            console.log(Math.round(parent.height * 0.07))
-        }
     }
 
     // "Main" area in which the "terminal" will reside in
@@ -175,7 +170,7 @@ Item {
             return battBar
         }
 
-        property int battPercent: (featureSlider.value * 100).toFixed(0)
+        property int battPercent: batteryChargePercentage.percent
         property int battBarNum: Math.round(battPercent * (battBarLength/100))
         property string battFormat: createBattBar(battBarNum)
         property string battString: `[<font color="${fg4}">${battFormat}</font>] <font color="${fg4}">${battPercent}%</font>`
