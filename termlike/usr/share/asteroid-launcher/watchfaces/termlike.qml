@@ -24,6 +24,7 @@
 import QtQuick 2.1
 import QtGraphicalEffects 1.12
 import QtSensors 5.11
+import org.asteroid.sensorlogd 1.0
 import org.asteroid.controls 1.0
 import org.asteroid.utils 1.0
 import Nemo.Configuration 1.0
@@ -32,19 +33,24 @@ import Nemo.Mce 1.0
 Item {
     property string fontName: "Terminus (TTF)"
 
-    // Foreground colors
+    // foreground colors
     property string fgMain: "#ffffff"
     property string fgAlt: "#a0a0a0"
 
-    // Color scheme
-    property string fg1: "#ffa7da"
-    property string fg2: "#b58858"
-    property string fg3: "#efbd8b"
-    property string fg4: "#a3d572"
-    property string fg5: "#98cbfe"
-    property string fg6: "#e5b0ff"
+    // color scheme
+    property string fg1: "#ffa7da" // date
+    property string fg2: "#b58858" // unused
+    property string fg3: "#efbd8b" // time
+    property string fg4: "#a3d572" // battery
+    property string fg5: "#98cbfe" // weather and username
+    property string fg6: "#e5b0ff" // health (step/hrm)
 
-    // Text shadow
+    // health-related variables
+    property bool hrmSensorActive: false
+    property int hrmBpm: 0
+    property var hrmBpmTime: wallClock.time
+
+    // text shadow
     layer.enabled: true
     layer.effect: DropShadow {
         verticalOffset: 3
@@ -54,28 +60,46 @@ Item {
         samples: 2
     }
 
-    // Font object, will be reused
+    // battery data
+    MceBatteryLevel {
+        id: batteryChargePercentage
+    }
+
+    // heart rate sensor data
+    HrmSensor {
+        active: !displayAmbient && hrmSensorActive
+        onReadingChanged: {
+            // set bpm only if its not reading 0
+            // (if it was actually 0 you probably have worse problems to deal with)
+            if (reading.bpm != 0) {
+                hrmBpm = reading.bpm
+                hrmBpmTime = wallClock.time
+            }
+        }
+    }
+
+    // font object, used for all text
     QtObject {
         id: theme
         property font wfFont: Qt.font({
             family: fontName,
             italic: false,
-            pixelSize: Math.round(parent.height * 0.07),
+            pixelSize: Math.round(parent.height * 0.08),
         })
     }
 
-    // "Main" area in which the "terminal" will reside in
+    // main rectangle the "terminal" resides in
     Rectangle {
         z: 1
         id: termArea
         anchors.verticalCenter: parent.verticalCenter
         anchors.horizontalCenter: parent.horizontalCenter
         color: Qt.rgba(0, 0, 0, 0.0)
-        width: parent.width * 0.65
-        height: parent.height * 0.5
+        width: parent.width * 0.8
+        height: parent.height * 0.6
     }
 
-    // Prompt (e.g. like "user@hostname")
+    // prompt (e.g. "[usr@astr ~]$ now")
     Text {
         z: 2
         id: promptText
@@ -99,7 +123,7 @@ Item {
         }
     }
 
-    // Time
+    // time (clock)
     Text {
         z: 3
         id: timeText
@@ -107,6 +131,7 @@ Item {
         font: theme.wfFont
         color: fgAlt
 
+        // adjust clock format if 12h/24h is used
         property string timeFormat: if (use12H.value) {
                                         wallClock.time.toLocaleString(Qt.locale(), "hh ap").slice(0, 2) + wallClock.time.toLocaleString(Qt.locale(), `:mm${!displayAmbient ? ":ss" : ""} AP`)
                                     }
@@ -125,7 +150,7 @@ Item {
         }
     }
 
-    // Date
+    // date
     Text {
         z: 4
         id: dateText
@@ -134,7 +159,7 @@ Item {
         color: fgAlt
 
         property string dateFormat: Qt.formatDate(wallClock.time, "ddd d MMM").toUpperCase()
-        property string dateString: `<font color="${fg2}">${dateFormat}</font>`
+        property string dateString: `<font color="${fg1}">${dateFormat}</font>`
 
         text: `[DATE] <strong>${dateString}</strong>`
         textFormat: Text.StyledText
@@ -146,7 +171,7 @@ Item {
         }
     }
 
-    // Battery
+    // battery
     Text {
         z: 5
         id: battText
@@ -154,7 +179,7 @@ Item {
         font: theme.wfFont
         color: fgAlt
 
-        // Create battery bar, e.g.: [##....] 27%
+        // battery bar, e.g.: [##....] 27%
         property int battBarLength: 6
         function createBattBar(battBarNum) {
             var battBar = ""
@@ -185,7 +210,7 @@ Item {
         }
     }
 
-    // Weather(?)
+    // weather
     Text {
         z: 5
         id: weatherText
@@ -193,6 +218,7 @@ Item {
         font: theme.wfFont
         color: fgAlt
 
+        // weather data from asteroidos, from analog-weather-glow (eLtMosen)
         ConfigurationValue {
             id: timestampDay0
             key: "/org/asteroidos/weather/timestamp-day0"
@@ -235,7 +261,8 @@ Item {
 
         property bool weatherSynced: maxTemp.value != 0
 
-        property string wthrFormat: `${kelvinToTemperatureString(minTemp.value)} <font color="${fgAlt}">/</font> ${kelvinToTemperatureString(maxTemp.value)}`
+        // weather is in the format [WTHR] minTemp / maxTemp
+        property string wthrFormat: `↓${kelvinToTemperatureString(minTemp.value)}<font color="${fgAlt}"> / </font>↑${kelvinToTemperatureString(maxTemp.value)}`
         property string wthrString: `<font color="${fg5}">${wthrFormat}</font>`
 
         text: `[WTHR] <strong>${wthrString}</strong>`
@@ -248,23 +275,29 @@ Item {
         }
     }
 
-    // Prompt (copy)
+    // general health (steps, heart rate)
     Text {
         z: 2
-        id: prompt2Text
+        id: healthText
         renderType: Text.NativeRendering
         font: theme.wfFont
-        color: fgMain
+        color: fgAlt
+
         visible: !displayAmbient
 
-        property string username: "usr"
-        property string hostname: "astr"
+        // heartrate monitor text (TODO: use ♥ later and combine into just "[HLTH]"?
+        property bool bpmIsRecent: parseInt((wallClock.time - hrmBpmTime) / 60000) === 0
+        property string hrmBpmTimeString: bpmIsRecent ? "now" : parseInt((wallClock.time - hrmBpmTime) / 60000) + "m ago"
+        property string hrmFormat: hrmBpm != 0 ? `${hrmBpm} <font color="${fgAlt}">(${hrmBpmTimeString})</font>` : `...`
+        property string hrmString: `<font color="${fg6}">${hrmFormat}</font>`
+        property string hrmText: `[HRTM] <strong>${hrmString}</strong>`
+        // step counter text
+        property string stepFormat: `step`
+        property string stepString: `<font color="${fg6}">${stepFormat}</font>`
+        property string stepText: `[STEP] <strong>${stepString}</strong>`
 
-        property string usernameString: `<strong><font color="${fg5}">${username}</font></strong>`
-        property string hostnameString: `<strong><font color="${fg4}">${hostname}</font></strong>`
-        property string promptString: `[${usernameString}@${hostnameString} ~]$ |`
 
-        text: promptString
+        text: hrmSensorActive ? hrmText : stepText
         textFormat: Text.StyledText
         horizontalAlignment: Text.AlignLeft
         anchors {
@@ -272,5 +305,21 @@ Item {
             left: termArea.left
             topMargin: promptText.height + timeText.height + dateText.height + battText.height + weatherText.height
         }
+
+        // tap to toggle between heartrate/step
+        MouseArea {
+            anchors.fill: parent
+            onClicked: {
+                hrmSensorActive = !hrmSensorActive
+            }
+        }
+    }
+
+    // burn-in offsets TODO: seems to be going off-screen on my hoki, check later?
+    Component.onCompleted: {
+        burnInProtectionManager.leftOffset = Qt.binding(function() { return width * nightstandMode.active ? .05 : .05})
+        burnInProtectionManager.rightOffset = Qt.binding(function() { return width * .05})
+        burnInProtectionManager.topOffset = Qt.binding(function() { return height * nightstandMode.active ? .05 : .05})
+        burnInProtectionManager.bottomOffset = Qt.binding(function() { return height * .05})
     }
 }
